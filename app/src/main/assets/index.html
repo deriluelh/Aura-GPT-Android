@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Aura GPT</title>
+    
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = { darkMode: 'class' }
+    </script>
+    
+    <!-- Load React & Babel -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Load Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        body { margin: 0; overflow: hidden; -webkit-tap-highlight-color: transparent; }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(156, 163, 175, 0.5); border-radius: 10px; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // === PASTE YOUR API KEY HERE ===
+        const API_KEY = "YOUR_API_KEY_HERE";
+
+        const THEMES = ['System', 'Light', 'Dark', 'AMOLED'];
+        const ACCENT_COLORS = [
+            { name: 'Blue', value: '#3b82f6' }, { name: 'Purple', value: '#8b5cf6' },
+            { name: 'Pink', value: '#ec4899' }, { name: 'Emerald', value: '#10b981' }
+        ];
+        const WALLPAPERS = [
+            { name: 'None', class: 'bg-gray-50 dark:bg-gray-900' },
+            { name: 'Blur', class: 'bg-gradient-to-br from-blue-100 to-purple-100 dark:from-blue-900/20 dark:to-purple-900/20' }
+        ];
+        
+        const PERSONAS = ['Assistant', 'Friendly', 'Professional', 'Teacher', 'Study Buddy', 'Best Friend', 'Programmer', 'Comedian', 'Sarcastic', 'Anime Character', 'Custom'];
+        const TONES = ['Formal', 'Casual', 'Friendly', 'Funny', 'Emotional', 'Smart', 'Supportive'];
+        const LENGTHS = ['Very Short', 'Short', 'Medium', 'Long', 'Very Detailed'];
+        const EMOJIS = ['None', 'Low', 'Medium', 'High'];
+
+        const DEFAULT_SETTINGS = {
+            theme: 'Dark', accentColor: '#8b5cf6', wallpaper: 'Blur', bubbleStyle: 'Glassmorphism', fontSize: 15,
+            persona: 'Assistant', customPersona: '', gender: 'None', tone: 'Friendly', creativity: 'Balanced', responseLength: 'Medium', emojiUsage: 'Medium', roleplay: false,
+            sensitiveTopics: false, nsfw: false, profanityFilter: 'Moderate',
+            model: 'Gemini Flash', temperature: 0.7, customSystemPrompt: ''
+        };
+
+        const generateSystemInstruction = (settings) => {
+            let prompt = `You are a ${settings.persona === 'Custom' && settings.customPersona ? settings.customPersona : settings.persona} AI. `;
+            if (settings.gender !== 'None') prompt += `You identify as ${settings.gender}. `;
+            prompt += `Your tone should be ${settings.tone}. `;
+            
+            if (settings.creativity === 'Precise') prompt += 'Be highly precise and factual. ';
+            else if (settings.creativity === 'Creative') prompt += 'Be highly creative and imaginative. ';
+            else prompt += 'Balance facts with engaging conversation. ';
+
+            prompt += `Response length should be ${settings.responseLength}. `;
+            
+            if (settings.emojiUsage === 'None') prompt += 'DO NOT use any emojis. ';
+            else if (settings.emojiUsage === 'High') prompt += 'Use a lot of emojis. ';
+            
+            if (settings.roleplay) prompt += 'You are participating in a roleplay. Stay strictly in character. ';
+            if (settings.nsfw || settings.sensitiveTopics) prompt += 'The user has enabled mature topics. Handle them maturely. ';
+            if (settings.customSystemPrompt) prompt += `\nAdditional user rules: ${settings.customSystemPrompt}`;
+            
+            return prompt;
+        };
+
+        const parseMarkdown = (text) => {
+            if (!text) return { __html: '' };
+            let html = text
+                .replace(/```([\s\S]*?)```/g, '<pre class="bg-black/50 p-3 rounded-xl my-2 overflow-x-auto border border-white/10 text-sm font-mono text-gray-200"><code>$1</code></pre>')
+                .replace(/`([^`]+)`/g, '<code class="bg-black/30 px-1 py-0.5 rounded text-sm font-mono text-purple-300">$1</code>')
+                .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+                .replace(/\n/g, '<br/>');
+            return { __html: html };
+        };
+
+        const Modal = ({ isOpen, onClose, title, children }) => {
+            if (!isOpen) return null;
+            return (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-white dark:bg-gray-900 rounded-3xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl border border-gray-200 dark:border-gray-800">
+                        <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-800">
+                            <h2 className="text-xl font-bold dark:text-white">{title}</h2>
+                            <button onClick={onClose} className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800"><i className="fas fa-times text-gray-400"></i></button>
+                        </div>
+                        <div className="p-6 overflow-y-auto flex-1 custom-scrollbar text-sm">{children}</div>
+                    </div>
+                </div>
+            );
+        };
+
+        function App() {
+            const [appState, setAppState] = useState('splash');
+            const [settings, setSettings] = useState(() => JSON.parse(localStorage.getItem('aura_settings')) || DEFAULT_SETTINGS);
+            const [chats, setChats] = useState(() => JSON.parse(localStorage.getItem('aura_chats')) || []);
+            const [currentChatId, setCurrentChatId] = useState(null);
+            const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+            const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+            const [settingsTab, setSettingsTab] = useState('AI Personality');
+            const [input, setInput] = useState('');
+            const [isLoading, setIsLoading] = useState(false);
+            const messagesEndRef = useRef(null);
+
+            useEffect(() => { setTimeout(() => setAppState('home'), 2000); }, []);
+            useEffect(() => { localStorage.setItem('aura_settings', JSON.stringify(settings)); }, [settings]);
+            useEffect(() => { localStorage.setItem('aura_chats', JSON.stringify(chats)); }, [chats]);
+
+            useEffect(() => {
+                if (appState === 'home' && chats.length === 0) createNewChat();
+            }, [appState]);
+
+            useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chats, currentChatId]);
+
+            useEffect(() => {
+                if (settings.theme === 'Dark' || settings.theme === 'AMOLED') document.documentElement.classList.add('dark');
+                else document.documentElement.classList.remove('dark');
+            }, [settings.theme]);
+
+            const updateSetting = (key, value) => setSettings(prev => ({ ...prev, [key]: value }));
+
+            const createNewChat = () => {
+                const newChat = { id: Date.now().toString(), title: 'New Conversation', messages: [] };
+                setChats(prev => [newChat, ...prev]);
+                setCurrentChatId(newChat.id);
+                setIsSidebarOpen(false);
+            };
+
+            const currentChat = chats.find(c => c.id === currentChatId) || { messages: [] };
+
+            const handleSend = async () => {
+                if (!input.trim() && !isLoading) return;
+                const userText = input.trim();
+                setInput('');
+                
+                const newMessage = { role: 'user', content: userText, id: Date.now() };
+                setChats(prev => prev.map(chat => chat.id === currentChatId ? { ...chat, messages: [...chat.messages, newMessage], title: chat.title === 'New Conversation' ? userText.substring(0, 30) + '...' : chat.title } : chat));
+                
+                setIsLoading(true);
+
+                try {
+                    const history = currentChat.messages.map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.content }] }));
+                    history.push({ role: 'user', parts: [{ text: userText }] });
+
+                    const payload = {
+                        contents: history,
+                        systemInstruction: { parts: [{ text: generateSystemInstruction(settings) }] },
+                        generationConfig: { temperature: settings.temperature }
+                    };
+
+                    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) throw new Error('API Request Failed');
+                    const data = await response.json();
+                    const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text || "I'm sorry, an error occurred.";
+
+                    setChats(prev => prev.map(chat => chat.id === currentChatId ? { ...chat, messages: [...chat.messages, { role: 'ai', content: aiText, id: Date.now() }] } : chat));
+                } catch (error) {
+                    setChats(prev => prev.map(chat => chat.id === currentChatId ? { ...chat, messages: [...chat.messages, { role: 'system', content: '⚠️ Connection Error.', id: Date.now() }] } : chat));
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+
+            const getBubbleClasses = (isUser) => {
+                const base = "max-w-[85%] p-3.5 shadow-sm overflow-hidden ";
+                const shape = isUser ? "rounded-2xl rounded-tr-sm" : "rounded-2xl rounded-tl-sm";
+                const color = isUser ? "bg-indigo-600 text-white" : "bg-white dark:bg-gray-800/80 backdrop-blur-md border border-white/10 text-gray-900 dark:text-gray-100";
+                return base + shape + " " + color;
+            };
+
+            if (appState === 'splash') {
+                return (
+                    <div className="h-screen w-screen flex flex-col items-center justify-center bg-gray-900 text-white">
+                        <i className="fas fa-sparkles text-indigo-400 text-6xl mb-6 animate-pulse"></i>
+                        <h1 className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-purple-500">Aura GPT</h1>
+                        <p className="text-gray-400 mt-2 font-medium">Powered by Gemini API</p>
+                    </div>
+                );
+            }
+
+            const appBg = settings.theme === 'AMOLED' ? 'bg-black' : (WALLPAPERS.find(w => w.name === settings.wallpaper)?.class || 'bg-gray-900');
+
+            return (
+                <div className={`h-screen w-screen flex overflow-hidden font-sans ${appBg} transition-colors duration-500`}>
+                    
+                    {/* Sidebar Mobile Overlay */}
+                    {isSidebarOpen && <div className="md:hidden fixed inset-0 bg-black/50 z-30 backdrop-blur-sm" onClick={() => setIsSidebarOpen(false)} />}
+
+                    {/* Sidebar */}
+                    <div className={`fixed md:static inset-y-0 left-0 z-40 w-72 transform transition-transform duration-300 ease-in-out ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'} flex flex-col bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border-r border-gray-200 dark:border-gray-800`}>
+                        <div className="p-4 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-lg bg-indigo-500 flex items-center justify-center text-white font-bold"><i className="fas fa-robot"></i></div>
+                                <span className="font-bold text-lg dark:text-white">Aura GPT</span>
+                            </div>
+                            <button onClick={() => setIsSidebarOpen(false)} className="md:hidden p-2 text-gray-500"><i className="fas fa-times"></i></button>
+                        </div>
+                        <div className="px-4 py-2">
+                            <button onClick={createNewChat} className="w-full flex items-center justify-center gap-2 bg-indigo-600 text-white py-3 rounded-xl font-medium shadow-lg shadow-indigo-500/30"><i className="fas fa-plus"></i> New Chat</button>
+                        </div>
+                        <div className="flex-1 overflow-y-auto px-2 py-2 space-y-1 custom-scrollbar">
+                            <div className="text-xs font-semibold text-gray-500 uppercase px-3 mb-2 mt-4">History</div>
+                            {chats.map(chat => (
+                                <button key={chat.id} onClick={() => { setCurrentChatId(chat.id); setIsSidebarOpen(false); }} className={`w-full text-left px-3 py-3 rounded-xl flex items-center gap-3 ${currentChatId === chat.id ? 'bg-indigo-500/20 text-indigo-400' : 'text-gray-300 hover:bg-gray-800'}`}>
+                                    <i className="fas fa-comment-alt text-sm opacity-70"></i>
+                                    <div className="truncate text-sm">{chat.title}</div>
+                                </button>
+                            ))}
+                        </div>
+                        <div className="p-4 border-t border-gray-800">
+                            <button onClick={() => setIsSettingsOpen(true)} className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-gray-800 text-gray-300"><i className="fas fa-cog"></i> Settings Engine</button>
+                        </div>
+                    </div>
+
+                    {/* Chat Area */}
+                    <div className="flex-1 flex flex-col relative h-full">
+                        <header className="h-16 flex items-center justify-between px-4 sticky top-0 z-20 backdrop-blur-md bg-white/10 dark:bg-gray-900/50 border-b border-gray-800/50">
+                            <div className="flex items-center gap-3">
+                                <button onClick={() => setIsSidebarOpen(true)} className="md:hidden p-2 text-gray-300"><i className="fas fa-bars text-lg"></i></button>
+                                <div className="flex flex-col">
+                                    <span className="font-semibold text-gray-900 dark:text-white truncate">{currentChat.title}</span>
+                                    <span className="text-xs text-indigo-400 font-medium">{settings.persona} • {settings.model}</span>
+                                </div>
+                            </div>
+                        </header>
+
+                        <div className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar" style={{ fontSize: `${settings.fontSize}px` }}>
+                            {currentChat.messages.length === 0 ? (
+                                <div className="h-full flex flex-col items-center justify-center text-center opacity-70">
+                                    <div className="w-20 h-20 bg-indigo-500/20 rounded-3xl flex items-center justify-center mb-6 text-indigo-400 text-3xl"><i className="fas fa-robot"></i></div>
+                                    <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Ready when you are.</h3>
+                                    <p className="text-gray-400 max-w-xs">I am currently acting as a <strong>{settings.tone} {settings.persona}</strong>. Open settings to change my brain.</p>
+                                </div>
+                            ) : (
+                                currentChat.messages.map(msg => (
+                                    <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                        <div className={getBubbleClasses(msg.role === 'user')}>
+                                            <div dangerouslySetInnerHTML={parseMarkdown(msg.content)} />
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                            {isLoading && <div className="flex justify-start"><div className={`${getBubbleClasses(false)} px-4 py-3`}><i className="fas fa-circle-notch fa-spin text-indigo-400"></i> Generating...</div></div>}
+                            <div ref={messagesEndRef} className="h-4" />
+                        </div>
+
+                        {/* Input Area */}
+                        <div className="p-3 bg-gray-900/60 backdrop-blur-xl border-t border-gray-800">
+                            <div className="max-w-4xl mx-auto flex items-end gap-2 bg-gray-800 rounded-2xl p-1.5 border border-gray-700">
+                                <textarea
+                                    value={input} onChange={(e) => setInput(e.target.value)}
+                                    placeholder="Message Aura..."
+                                    className="flex-1 max-h-32 min-h-[44px] bg-transparent border-none text-white px-3 py-3 outline-none resize-none"
+                                    rows={1}
+                                />
+                                <button onClick={handleSend} disabled={isLoading} className="p-3 mb-1 mr-1 bg-indigo-600 text-white rounded-xl shadow-lg disabled:opacity-50">
+                                    <i className="fas fa-paper-plane"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Settings Modal */}
+                    <Modal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} title="Engine Settings">
+                        <div className="flex flex-col md:flex-row gap-4 h-full">
+                            <div className="w-full md:w-48 flex md:flex-col gap-2 overflow-x-auto border-b md:border-b-0 md:border-r border-gray-800 pb-2 md:pr-4">
+                                {['AI Personality', 'Content Limits', 'Advanced'].map(tab => (
+                                    <button key={tab} onClick={() => setSettingsTab(tab)} className={`text-left px-3 py-2 rounded-xl text-sm font-medium whitespace-nowrap ${settingsTab === tab ? 'bg-indigo-500/20 text-indigo-400' : 'text-gray-400'}`}>{tab}</button>
+                                ))}
+                            </div>
+                            <div className="flex-1 space-y-4">
+                                {settingsTab === 'AI Personality' && (
+                                    <>
+                                        <div><label className="text-gray-400 text-xs">Persona</label><select value={settings.persona} onChange={e => updateSetting('persona', e.target.value)} className="w-full bg-gray-800 text-white p-2 mt-1 rounded-lg outline-none border border-gray-700">{PERSONAS.map(p => <option key={p}>{p}</option>)}</select></div>
+                                        <div><label className="text-gray-400 text-xs">Tone</label><select value={settings.tone} onChange={e => updateSetting('tone', e.target.value)} className="w-full bg-gray-800 text-white p-2 mt-1 rounded-lg outline-none border border-gray-700">{TONES.map(t => <option key={t}>{t}</option>)}</select></div>
+                                        <div><label className="text-gray-400 text-xs">Creativity</label><select value={settings.creativity} onChange={e => updateSetting('creativity', e.target.value)} className="w-full bg-gray-800 text-white p-2 mt-1 rounded-lg outline-none border border-gray-700"><option>Precise</option><option>Balanced</option><option>Creative</option></select></div>
+                                        <div><label className="text-gray-400 text-xs">Length</label><select value={settings.responseLength} onChange={e => updateSetting('responseLength', e.target.value)} className="w-full bg-gray-800 text-white p-2 mt-1 rounded-lg outline-none border border-gray-700">{LENGTHS.map(l => <option key={l}>{l}</option>)}</select></div>
+                                    </>
+                                )}
+                                {settingsTab === 'Content Limits' && (
+                                    <>
+                                        <div className="flex justify-between items-center bg-gray-800 p-3 rounded-xl border border-gray-700"><span className="text-white text-sm">Roleplay Mode</span><input type="checkbox" checked={settings.roleplay} onChange={e => updateSetting('roleplay', e.target.checked)} className="accent-indigo-500 w-5 h-5"/></div>
+                                        <div className="flex justify-between items-center bg-gray-800 p-3 rounded-xl border border-gray-700"><span className="text-white text-sm">Allow Mature (18+)</span><input type="checkbox" checked={settings.nsfw} onChange={e => updateSetting('nsfw', e.target.checked)} className="accent-indigo-500 w-5 h-5"/></div>
+                                    </>
+                                )}
+                                {settingsTab === 'Advanced' && (
+                                    <>
+                                        <div><label className="text-gray-400 text-xs">Model Temperature ({settings.temperature})</label><input type="range" min="0" max="1" step="0.1" value={settings.temperature} onChange={e => updateSetting('temperature', parseFloat(e.target.value))} className="w-full mt-2 accent-indigo-500"/></div>
+                                        <div className="mt-4"><label className="text-gray-400 text-xs">Custom System Instruction</label><textarea value={settings.customSystemPrompt} onChange={e => updateSetting('customSystemPrompt', e.target.value)} placeholder="Type global rules here..." className="w-full bg-gray-800 text-white p-3 mt-1 rounded-xl border border-gray-700 h-24 outline-none"></textarea></div>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                    </Modal>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
